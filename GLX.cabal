@@ -16,6 +16,6 @@ Library
         Graphics.X11.GLX.Extensions
     extensions:	        ForeignFunctionInterface, CPP
     extra-libraries:    "GL"
-    build-depends:	base >= 3 && < 5, X11, OpenGLRaw
+    build-depends:	base >= 3 && < 5, X11 >= 1.6, OpenGLRaw
     ghc-options:        -funbox-strict-fields -Wall -fno-warn-unused-binds
     ghc-prof-options:   -prof -auto-all

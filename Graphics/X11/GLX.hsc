@@ -50,7 +50,7 @@ module Graphics.X11.GLX
     
     , glxRgbaBit
 
-    , XVisualInfo
+    -- , XVisualInfo
     , GLXContext(..)
     , GLXFBConfig
 
@@ -104,9 +104,9 @@ module Graphics.X11.GLX
 --    , glXReleaseTexImageEXT
 
     -- misc
-    , xviVisualId
-    , xviVisual
-    , xviDepth
+    -- , xviVisualId
+    -- , xviVisual
+    -- , xviDepth
     , withAttrList
     ) where
 
@@ -129,6 +129,7 @@ module Graphics.X11.GLX
 
 #include "GL/glx.h"
 
+import Control.Applicative ((<$>))
 import Data.Maybe
 import Foreign.C.Types
 import Foreign.C.String
@@ -232,27 +233,29 @@ glxRgbaBit          = (#const GLX_RGBA_BIT)
 
 
 
-newtype XVisualInfo = XVisualInfo (Ptr XVisualInfo) -- this should probably be in X11...
+-- newtype XVisualInfo = XVisualInfo (Ptr XVisualInfo) -- this should probably be in X11...
 newtype GLXContext = GLXContext (Ptr GLXContext)
 newtype GLXFBConfig = GLXFBConfig (Ptr GLXFBConfig)
 
-glXChooseVisual :: Display -> ScreenNumber -> [GLXAttribute] -> IO (Maybe XVisualInfo)
+glXChooseVisual :: Display -> ScreenNumber -> [GLXAttribute] -> IO (Maybe VisualInfo)
 glXChooseVisual dpy screen attrs = do
-    xvi@(XVisualInfo xviPtr) <- withAttrList attrs $ cglXChooseVisual dpy screen
+    xviPtr <- withAttrList attrs $ cglXChooseVisual dpy screen
     if xviPtr == nullPtr
         then return Nothing
-        else return (Just xvi)
+        else Just <$> peek xviPtr 
 foreign import ccall unsafe "glXChooseVisual"
-    cglXChooseVisual :: Display -> ScreenNumber -> Ptr Int32 -> IO XVisualInfo
+    cglXChooseVisual :: Display -> ScreenNumber -> Ptr Int32 -> IO (Ptr VisualInfo)
 
-glXCreateContext :: Display -> XVisualInfo -> Maybe GLXContext -> Bool -> IO (Maybe GLXContext)
+glXCreateContext :: Display -> VisualInfo -> Maybe GLXContext -> Bool -> IO (Maybe GLXContext)
 glXCreateContext dpy xvi share direct = do
-    ctx@(GLXContext ctxPtr) <- cglXCreateContext dpy xvi (fromMaybe (GLXContext nullPtr) share) direct
-    if ctxPtr == nullPtr
+    alloca $ \xviPtr -> do 
+      poke xviPtr xvi 
+      ctx@(GLXContext ctxPtr) <- cglXCreateContext dpy xviPtr (fromMaybe (GLXContext nullPtr) share) direct
+      if ctxPtr == nullPtr
         then return Nothing
         else return (Just ctx)
 foreign import ccall unsafe "glXCreateContext"
-    cglXCreateContext :: Display -> XVisualInfo -> GLXContext -> Bool -> IO GLXContext
+    cglXCreateContext :: Display -> Ptr VisualInfo -> GLXContext -> Bool -> IO GLXContext
 
 foreign import ccall unsafe "glXDestroyContext"
     glXDestroyContext :: Display -> GLXContext -> IO ()
@@ -266,8 +269,13 @@ foreign import ccall unsafe "glXCopyContext"
 foreign import ccall unsafe "glXSwapBuffers"
     glXSwapBuffers :: Display -> GLXDrawable -> IO ()
 
+glXCreateGLXPixmap :: Display -> VisualInfo -> Pixmap -> IO GLXPixmap 
+glXCreateGLXPixmap dpy xvi pixmap = do
+    alloca $ \xviPtr -> do 
+      poke xviPtr xvi 
+      cglXCreateGLXPixmap dpy xviPtr pixmap
 foreign import ccall unsafe "glXCreateGLXPixmap"
-    glXCreateGLXPixmap :: Display -> XVisualInfo -> Pixmap -> IO GLXPixmap
+    cglXCreateGLXPixmap :: Display -> Ptr VisualInfo -> Pixmap -> IO GLXPixmap
 
 foreign import ccall unsafe "glXDestroyGLXPixmap"
     glXDestroyGLXPixmap :: Display -> GLXPixmap -> IO ()
@@ -289,8 +297,13 @@ foreign import ccall unsafe "glXQueryVersion"
 foreign import ccall unsafe "glXIsDirect"
     glXIsDirect :: Display -> GLXContext -> IO Bool
 
+glXGetConfig :: Display -> VisualInfo -> CInt -> Ptr CInt -> IO CInt 
+glXGetConfig dpy xvi attrib valuePtr = do
+    alloca $ \xviPtr -> do 
+      poke xviPtr xvi 
+      cglXGetConfig dpy xviPtr attrib valuePtr 
 foreign import ccall unsafe "glXGetConfig"
-    glXGetConfig :: Display -> XVisualInfo -> CInt -> Ptr CInt -> IO CInt
+    cglXGetConfig :: Display -> Ptr VisualInfo -> CInt -> Ptr CInt -> IO CInt
 
 glXGetCurrentContext :: IO (Maybe GLXContext)
 glXGetCurrentContext = do
@@ -384,14 +397,14 @@ glXGetFBConfigs dpy screen =
 foreign import ccall unsafe "glXGetFBConfigs"
     cglXGetFBConfigs :: Display -> ScreenNumber -> Ptr CInt -> IO GLXFBConfig
 
-glXGetVisualFromFBConfig :: Display -> GLXFBConfig -> IO (Maybe XVisualInfo)
+glXGetVisualFromFBConfig :: Display -> GLXFBConfig -> IO (Maybe VisualInfo)
 glXGetVisualFromFBConfig dpy fbc = do
-    xvi@(XVisualInfo xviPtr) <- cglXGetVisualFromFBConfig dpy fbc
+    xviPtr <- cglXGetVisualFromFBConfig dpy fbc
     if xviPtr == nullPtr
         then return Nothing
-        else return (Just xvi)
+        else Just <$> peek xviPtr 
 foreign import ccall unsafe "glXGetVisualFromFBConfig"
-    cglXGetVisualFromFBConfig :: Display -> GLXFBConfig -> IO XVisualInfo
+    cglXGetVisualFromFBConfig :: Display -> GLXFBConfig -> IO (Ptr VisualInfo)
 
 glXCreateWindow :: Display -> GLXFBConfig -> Window -> [GLXAttribute] -> IO GLXWindow
 glXCreateWindow dpy fbconfig win attrs =
@@ -450,15 +463,18 @@ foreign import ccall unsafe "glXGetSelectedEvent"
 
 
 -- helper functions
+{- 
+xviVisual :: VisualInfo -> Visual
+xviVisual (VisualInfo xvi) = Visual ((#ptr VisualInfo, visual) xvi)
 
-xviVisual :: XVisualInfo -> Visual
-xviVisual (XVisualInfo xvi) = Visual ((#ptr XVisualInfo, visual) xvi)
+xviVisualId :: VisualInfo -> IO VisualID
+xviVisualId (VisualInfo xvi) = ((#peek VisualInfo, visualid) xvi)
+-}
 
-xviVisualId :: XVisualInfo -> IO VisualID
-xviVisualId (XVisualInfo xvi) = ((#peek XVisualInfo, visualid) xvi)
-
-xviDepth :: XVisualInfo -> IO CInt
-xviDepth (XVisualInfo xvi) = ((#peek XVisualInfo, depth) xvi)
+{-
+xviDepth :: VisualInfo -> IO CInt
+xviDepth (VisualInfo xvi) = ((#peek VisualInfo, depth) xvi)
+-}
 
 withAttrList :: [GLXAttribute] -> (Ptr Int32 -> IO a) -> IO a
 withAttrList attrs f = withArray0 (#const None) attrs $ \attrlist -> f attrlist
